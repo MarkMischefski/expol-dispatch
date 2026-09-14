@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920, initial-scale=1">
+<title>Expol Dispatch Dashboard</title>
+<style>
+  :root {
+    --bg:        #0a0c12;
+    --surface:   #12151f;
+    --card:      #171b28;
+    --border:    #262b3d;
+    --accent:    #f97316;
+    --green:     #22c55e;
+    --amber:     #f59e0b;
+    --red:       #ef4444;
+    --blue:      #3b82f6;
+    --text:      #f3f5fa;
+    --muted:     #8c96ab;
+    --faint:     #525a70;
+    --mono:      'JetBrains Mono', 'Consolas', monospace;
+    --sans:      'Inter', -apple-system, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  * { cursor: default !important; }
+
+  .shell {
+    display: flex;
+    flex-direction: column;
+    height: 1080px;
+    padding: 10px 34px 14px;
+    gap: 10px;
+  }
+
+  .header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-shrink: 0;
+    margin-bottom: 2px;
+  }
+  .header h1 { font-size: 13px; font-weight: 700; letter-spacing: -0.1px; color: var(--faint); }
+  .header h1 .branch { color: var(--accent); }
+  .header .clock { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--faint); }
+
+  .stale-banner {
+    display: none;
+    flex-shrink: 0;
+    background: var(--red);
+    color: #fff;
+    font-size: 24px;
+    font-weight: 800;
+    text-align: center;
+    padding: 12px;
+    border-radius: 10px;
+    letter-spacing: 0.5px;
+  }
+  .stale-banner.show { display: block; }
+
+  /* ── Tiles ── */
+  .tiles {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 14px;
+  }
+  .tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 18px;
+  }
+  .tile.danger { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.07); }
+  .tile.ok { border-color: rgba(34,197,94,0.4); background: rgba(34,197,94,0.07); }
+  .tile-label { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px; }
+  .tile.danger .tile-label { color: var(--red); }
+  .tile.ok .tile-label { color: var(--green); }
+  .tile-val { font-family: var(--mono); font-size: 36px; font-weight: 800; line-height: 1; }
+  .tile.danger .tile-val { color: var(--red); }
+  .tile.ok .tile-val { color: var(--green); }
+
+  /* ── Body layout: manifest queue on top (tall), collects + external below ── */
+  .body-stack { flex: 1; display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow: hidden; }
+
+  .section-title {
+    font-size: 22px;
+    font-weight: 800;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .section-title .count {
+    font-family: var(--mono);
+    font-size: 17px;
+    color: var(--muted);
+    background: var(--card);
+    padding: 3px 12px;
+    border-radius: 7px;
+  }
+
+  .tbl-wrap {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    overflow: hidden; display: flex; flex-direction: column; min-height: 0;
+    --row-font-size: 22px;
+    --row-pad-v: 12px;
+    --row-pad-h: 18px;
+  }
+  .tbl-scroll { overflow-y: auto; flex: 1; min-height: 0; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    position: sticky; top: 0;
+    background: var(--card);
+    color: var(--muted);
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    font-weight: 700;
+    text-align: left;
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  tbody td {
+    padding: var(--row-pad-v) var(--row-pad-h);
+    border-bottom: 1px solid var(--border);
+    font-size: var(--row-font-size);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  .mono { font-family: var(--mono); }
+  .right { text-align: right; }
+  .empty-row td { text-align: center; color: var(--faint); padding: 30px 18px; font-size: 18px; }
+
+  .badge {
+    display: inline-block;
+    font-size: var(--badge-font-size, 14px);
+    font-weight: 800;
+    letter-spacing: 0.3px;
+    padding: var(--badge-pad-v, 4px) var(--badge-pad-h, 12px);
+    border-radius: 7px;
+  }
+  .badge.overdue    { background: rgba(239,68,68,0.18); color: var(--red); }
+  .badge.loading    { background: rgba(245,158,11,0.18); color: var(--amber); }
+  .badge.ready      { background: rgba(59,130,246,0.18); color: var(--blue); }
+  .badge.dispatched { background: rgba(34,197,94,0.18); color: var(--green); }
+  .badge.complete   { background: rgba(34,197,94,0.35); color: var(--green); font-weight: 900; }
+  .badge.failed     { background: rgba(239,68,68,0.18); color: var(--red); margin-left: 8px; }
+
+  .two-col { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; flex: 1.15; min-height: 0; }
+  .two-col .section { display: flex; flex-direction: column; min-height: 0; }
+
+  .footer { flex-shrink: 0; display: flex; justify-content: flex-end; font-size: 15px; color: var(--faint); font-family: var(--mono); }
+  .footer .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--green); margin-right: 8px; vertical-align: middle; }
+  .footer .dot.stale { background: var(--red); }
+</style>
+</head>
+<body>
+
+  <div class="shell">
+    <div class="header">
+      <h1>Expol Dispatch — <span class="branch" id="branch-name">—</span></h1>
+      <div class="clock" id="clock">--:--:--</div>
+    </div>
+
+    <div class="stale-banner" id="stale-banner">⚠ DATA STALE — LAST UPDATE OVER 5 MINUTES AGO</div>
+
+    <div class="tiles">
+      <div class="tile"><div class="tile-label">Yesterday — m³ delivered</div><div class="tile-val" id="tile-cubic">—</div></div>
+      <div class="tile"><div class="tile-label">Yesterday — avg runs / courier</div><div class="tile-val" id="tile-avgruns">—</div></div>
+      <div class="tile"><div class="tile-label">Ready to manifest — orders</div><div class="tile-val" id="tile-readyorders">—</div></div>
+      <div class="tile"><div class="tile-label">Ready to manifest — m³</div><div class="tile-val" id="tile-readycubic">—</div></div>
+      <div class="tile" id="tile-rubbish-wrap"><div class="tile-label">Rubbish pickup — overdue</div><div class="tile-val" id="tile-rubbish-overdue">—</div></div>
+      <div class="tile" id="tile-overdue-wrap"><div class="tile-label">Overdue orders</div><div class="tile-val" id="tile-overdue-orders">—</div></div>
+      <div class="tile" id="tile-failed-wrap"><div class="tile-label">Failed deliveries — 7 days</div><div class="tile-val" id="tile-failed">—</div></div>
+    </div>
+
+    <div class="body-stack">
+      <div class="section" style="flex:1.3;display:flex;flex-direction:column;min-height:0;">
+        <div class="section-title"><span>Manifest queue</span><span class="count" id="manifest-count">0</span><span class="count" id="manifest-holdover" style="display:none;color:var(--amber);">showing yesterday</span></div>
+        <div class="tbl-wrap" data-autofit="true">
+          <div class="tbl-scroll">
+            <table>
+              <thead>
+                <tr><th>Manifest</th><th>Carrier / area</th><th>Phase</th><th>Planned ETD</th><th>Location</th><th class="right">Orders</th><th class="right">Delivered</th><th class="right">m³</th></tr>
+              </thead>
+              <tbody id="manifest-tbody"><tr class="empty-row"><td colspan="7">Loading…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="section">
+          <div class="section-title"><span>Collects due</span><span class="count" id="collects-count">0</span></div>
+          <div class="tbl-wrap" data-autofit="true">
+            <div class="tbl-scroll">
+              <table>
+                <thead><tr><th>Order</th><th>Customer</th><th>Cust PO</th><th>Phase</th><th class="right">m³</th></tr></thead>
+                <tbody id="collects-tbody"><tr class="empty-row"><td colspan="5">Loading…</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-title"><span>External couriers</span><span class="count" id="external-count">0</span><span class="count" id="external-holdover" style="display:none;color:var(--amber);">showing yesterday</span></div>
+          <div class="tbl-wrap" data-autofit="true">
+            <div class="tbl-scroll">
+              <table>
+                <thead><tr><th>Manifest</th><th>Carrier / area</th><th class="right">Orders</th><th class="right">m³</th></tr></thead>
+                <tbody id="external-tbody"><tr class="empty-row"><td colspan="4">Loading…</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span class="dot" id="status-dot"></span>
+      <span id="last-updated">Connecting…</span>
+    </div>
+  </div>
+
+<script>
+// ══════════════════════════════════════════════════════════════════════════
+// CONFIG — embedded directly since this kiosk page has no settings UI at
+// all, same pattern as tv-view.html. Read-only credentials.
+// ══════════════════════════════════════════════════════════════════════════
+const SUPA_URL = 'https://jrpysikxibrbbellroid.supabase.co';
+const SUPA_KEY = 'PASTE_YOUR_ANON_KEY_HERE';
+
+// Branch comes from the URL, e.g. dispatch-tv.html?branch=4 — same pattern
+// as tv-view.html. No fallback to "all branches": a screen with no branch
+// specified should show an error, not silently display the wrong site.
+const params = new URLSearchParams(window.location.search);
+
+// Branch number from URL ?branch=N parameter.
+// Each kiosk shortcut points to the GitHub Pages URL with the correct branch:
+//   https://YOURUSER.github.io/expol-dispatch/dispatch-tv.html?branch=0
+// Branch numbers: 0=Auckland 1=Blenheim 3=Wellington 4=Christchurch
+//                 5=Rolleston 6=Cromwell 7=Tauranga
+const BRANCH_NO = params.has('branch') ? parseInt(params.get('branch')) : null;
+
+const POLL_INTERVAL_MS   = 10 * 60 * 1000; // 10 minutes
+const STALE_THRESHOLD_MS = 15 * 60 * 1000; // 15 min — show the stale banner
+const HARD_RELOAD_MS     = 30 * 60 * 1000; // 30 min — last-resort full reload
+
+// ══════════════════════════════════════════════════════════════════════════
+// STATE — same shape as the desk dashboard
+// ══════════════════════════════════════════════════════════════════════════
+let orders = [];
+let manifests = [];
+let debtors = {};   // accno -> name
+let couriers = {};  // courier_name -> {show_in_app, isactive, ...}
+let branchNames = {}; // branchno -> name, from the capacity app's shared settings
+let vehiclePositions = {}; // carrier_code -> { suburb, lat, lng, full_address }
+let lastSuccessfulFetch = null;
+
+function supaHeaders() { return { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }; }
+
+async function fetchAllPages(table, params = '') {
+  const pageSize = 1000;
+  let all = [], offset = 0;
+  while (true) {
+    const res = await fetch(`${SUPA_URL}/rest/v1/${table}?select=*${params}`, {
+      headers: { ...supaHeaders(), 'Range-Unit': 'items', 'Range': `${offset}-${offset+pageSize-1}` }
+    });
+    if (!res.ok) throw new Error(`${table} fetch failed: ${res.status}`);
+    const page = await res.json();
+    all = all.concat(page);
+    if (page.length < pageSize) break;
+    offset += pageSize;
+  }
+  return all;
+}
+
+// Formats a date as YYYY-MM-DD using the BROWSER's own local timezone — NOT
+// toISOString(), which always converts to UTC first. NZ is 12-13 hours ahead
+// of UTC, so toISOString().slice(0,10) reports the WRONG (previous) date for
+// roughly the first half of every NZ day (midnight to ~noon NZT).
+function fmtDateLocal(d) {
+  // Explicitly use NZ timezone so dates are correct regardless of what
+  // timezone the browser/OS is set to. Using getDate()/getMonth()/getFullYear()
+  // returns browser-local dates, which on a UTC or non-NZ machine gives wrong
+  // dates for timestamps that straddle NZ midnight (e.g. a job completing at
+  // 00:35 NZT has UTC date of the previous day — getDate() returns yesterday).
+  return d.toLocaleDateString('en-NZ', {
+    timeZone: 'Pacific/Auckland',
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).split('/').reverse().join('-');
+}
+
+function customerName(accno) {
+  return debtors[accno] || (accno != null ? `Account ${accno}` : '—');
+}
+
+function branchName(n) { return branchNames[n] || `Branch ${n}`; }
+
+// Several ERP flag columns turn out to use different storage formats
+// depending on the field — X_COLLECT is 'Y'/'N' text, but X_RUBBISH_PICKUP
+// turned out to be a numeric 1/0 despite looking the same in the one sample
+// we'd seen. Checks every truthy representation actually encountered: 'Y'
+// (any case), 1 (number), or '1' (string).
+function isTruthyFlag(val) {
+  if (val === 1 || val === '1') return true;
+  return (val || '').toString().toUpperCase() === 'Y';
+}
+
+async function fetchAll() {
+  const [orderRows, manifestRows, debtorRows, courierRows, settingsRows, vehicleRows] = await Promise.all([
+    fetchAllPages('dispatch_orders'),
+    fetchAllPages('dispatch_manifests'),
+    fetchAllPages('dispatch_debtors'),
+    fetchAllPages('dispatch_couriers'),
+    fetchAllPages('capacity_app_settings', '&id=eq.1'),
+    fetchAllPages('dispatch_vehicle_positions'),
+  ]);
+  orders = orderRows;
+  manifests = manifestRows;
+  vehiclePositions = Object.fromEntries(vehicleRows.map(v => [v.carrier_code, v]));
+  debtors = Object.fromEntries(debtorRows.map(d => [d.accno, d.name]));
+  couriers = Object.fromEntries(courierRows.map(c => [c.courier_name, c]));
+  if (settingsRows && settingsRows.length) {
+    branchNames = (settingsRows[0].settings || {}).branchNames || {};
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// RENDER — identical logic to dispatch-dashboard.html, scoped to BRANCH_NO
+// instead of a user-selected branch.
+// ══════════════════════════════════════════════════════════════════════════
+function lastWorkingDayStr(fromDate) {
+  const d = new Date(fromDate);
+  d.setHours(0,0,0,0);
+  do {
+    d.setDate(d.getDate() - 1);
+  } while (d.getDay() === 0 || d.getDay() === 6);
+  return fmtDateLocal(d);
+}
+
+// Same idea, walking FORWARD instead of back — returns the date that is
+// `n` WORKING days ahead of fromDate, skipping weekends. Used for the
+// manifest queue's "show the next couple of working days" window, so a
+// Friday-created manifest with a Monday ETD still shows up (Monday is the
+// next working day, even though it's 3 CALENDAR days away).
+function nextWorkingDayStr(fromDate, n) {
+  const d = new Date(fromDate);
+  d.setHours(0,0,0,0);
+  let remaining = n;
+  while (remaining > 0) {
+    d.setDate(d.getDate() + 1);
+    if (d.getDay() !== 0 && d.getDay() !== 6) remaining--;
+  }
+  return fmtDateLocal(d);
+}
+
+// Sets a tile's value and toggles red/green based on whether it's > 0.
+// Shared by Rubbish Pickup, Overdue Orders, and Failed Deliveries.
+function setAlertTile(wrapId, valId, count) {
+  document.getElementById(valId).textContent = count;
+  const wrap = document.getElementById(wrapId);
+  wrap.classList.toggle('danger', count > 0);
+  wrap.classList.toggle('ok', count === 0);
+}
+
+function renderTiles(branchOrders, branchManifests, todayStr) {
+  const yesterdayStr = lastWorkingDayStr(new Date());
+
+  const yesterdayLocalManifests = branchManifests.filter(m =>
+    m.transdate === yesterdayStr && couriers[m.carriercode]?.show_in_app === true
+  );
+  const yesterdayCubic = yesterdayLocalManifests.reduce((s,m) => s + (Number(m.manifest_cubic) || 0), 0);
+  const distinctCouriers = new Set(yesterdayLocalManifests.map(m => m.carriercode)).size;
+  const avgRunsPerCourier = distinctCouriers > 0 ? (yesterdayLocalManifests.length / distinctCouriers) : 0;
+
+  const readyOrders = branchOrders.filter(o => o.ordstatus === 36 && !o.has_manifest && o.duedate <= todayStr);
+  const readyCubic = readyOrders.reduce((s,o) => s + (Number(o.order_cubic) || 0), 0);
+
+  const rubbishOverdue = branchOrders.filter(o =>
+    o.status === 0 && isTruthyFlag(o.x_rubbish_pickup) && o.duedate < todayStr && !isTruthyFlag(o.onhold)
+  ).length;
+
+  const overdueOrders = branchOrders.filter(o =>
+    o.status === 0 && o.duedate < todayStr
+    && !isTruthyFlag(o.x_rubbish_pickup)
+    && (o.x_collect||'').toUpperCase() !== 'Y'
+    && !isTruthyFlag(o.onhold)
+  ).length;
+
+  const manifestByNo = Object.fromEntries(branchManifests.map(m => [m.manifestno, m]));
+  const sevenDaysAgoStr = (() => {
+    const d = new Date(); d.setDate(d.getDate() - 7); d.setHours(0,0,0,0);
+    return fmtDateLocal(d);
+  })();
+  const failed = branchOrders.filter(o => {
+    if (o.ordstatus !== 83) return false;
+    const m = o.manifest != null ? manifestByNo[o.manifest] : null;
+    if (!m || !m.transdate) return false;
+    return m.transdate >= sevenDaysAgoStr && m.transdate <= todayStr;
+  }).length;
+
+  document.getElementById('tile-cubic').textContent = yesterdayCubic.toFixed(1);
+  document.getElementById('tile-avgruns').textContent = avgRunsPerCourier.toFixed(1);
+  document.getElementById('tile-readyorders').textContent = readyOrders.length;
+  document.getElementById('tile-readycubic').textContent = readyCubic.toFixed(1);
+
+  setAlertTile('tile-rubbish-wrap', 'tile-rubbish-overdue', rubbishOverdue);
+  setAlertTile('tile-overdue-wrap', 'tile-overdue-orders', overdueOrders);
+  setAlertTile('tile-failed-wrap', 'tile-failed', failed);
+}
+
+// ── Geofence ──────────────────────────────────────────────────────────────────
+const DEPOT_LOCATIONS = [
+  { lat: -36.9253, lng: 174.8018, radius: 0.3 }, // Auckland — Captain Springs Rd, Onehunga
+];
+
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2
+    + Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function isAtBase(carrierCode) {
+  const pos = vehiclePositions[carrierCode?.toUpperCase?.()];
+  if (!pos || pos.lat == null || pos.lng == null) return null;
+  const lat = parseFloat(pos.lat);
+  const lng = parseFloat(pos.lng);
+  if (isNaN(lat) || isNaN(lng)) return null;
+  return DEPOT_LOCATIONS.some(depot =>
+    haversineKm(lat, lng, depot.lat, depot.lng) <= (depot.radius || 0.3)
+  );
+}
+
+function phaseBadgeForEtd(etd, now, hasDeliveryComplete, isFullyComplete, isPreliminary, atBase) {
+  if (isFullyComplete) return '<span class="badge complete">Complete</span>';
+  if (isPreliminary)   return '<span class="badge ready">Ready for despatch</span>';
+  const hoursToEtd = etd ? (etd - now) / 3600000 : null;
+  const isOverdue  = hoursToEtd !== null && hoursToEtd < 0;
+  const isNearEtd  = hoursToEtd !== null && hoursToEtd >= 0 && hoursToEtd <= 1;
+  if (atBase === false) return '<span class="badge dispatched">Out for delivery</span>';
+  if (atBase === true) {
+    if (isOverdue) return '<span class="badge overdue">Overdue</span>';
+    if (isNearEtd) return '<span class="badge loading">Loading</span>';
+    return '<span class="badge ready">Ready for despatch</span>';
+  }
+  if (hasDeliveryComplete) return '<span class="badge dispatched">Out for delivery</span>';
+  if (isOverdue)  return '<span class="badge overdue">Overdue</span>';
+  if (isNearEtd)  return '<span class="badge loading">Loading</span>';
+  return '<span class="badge ready">Ready for despatch</span>';
+}
+
+function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDayStr, todayHasStarted) {
+  const tbody = document.getElementById('manifest-tbody');
+  const now = new Date();
+
+  const windowEndStr = nextWorkingDayStr(now, 2);
+  const inWindowNormal = etd => !etd || fmtDateLocal(new Date(etd)) <= windowEndStr;
+
+  const ordersByManifest = {};
+  orders.forEach(o => {
+    if (o.manifest == null) return;
+    if (!ordersByManifest[o.manifest]) ordersByManifest[o.manifest] = [];
+    ordersByManifest[o.manifest].push(o);
+  });
+
+  const manifestRows = branchManifests
+    .filter(m => todayHasStarted
+      ? (m.status === 0 || (m.status === 1 && m.etd && fmtDateLocal(new Date(m.etd)) === todayStr))
+      : (m.transdate === queueDayStr))
+    .filter(m => couriers[m.carriercode]?.show_in_app === true)
+    .filter(m => todayHasStarted ? inWindowNormal(m.etd) : true)
+    .map(m => {
+      const manifestEtd = m.etd ? new Date(m.etd) : null;
+      const allManifestOrders = ordersByManifest[m.manifestno] || [];
+      const relatedOrders = allManifestOrders.filter(o => {
+        if (o.ordstatus === 90 || o.ordstatus === 83) return true;
+        if (!o.etd || !manifestEtd) return true;
+        return new Date(o.etd) <= manifestEtd;
+      });
+      const delivered = relatedOrders.filter(o => o.ordstatus === 90).length;
+      const failed = relatedOrders.filter(o => o.ordstatus === 83).length;
+      const hasExcludedOrders = relatedOrders.length < allManifestOrders.length;
+      return {
+        sortEtd: m.etd ? new Date(m.etd) : null,
+        manifestLabel: String(m.manifestno),
+        carrierLabel: m.carriercode || '—',
+        etd: m.etd ? new Date(m.etd) : null,
+        orderCount: allManifestOrders.length,
+        delivered, failed,
+        cubic: m.manifest_cubic != null ? Number(m.manifest_cubic).toFixed(1) : '—',
+        isPreliminary: false,
+        hasManifestComplete: !!m.delivery_complete,
+        hasExcludedOrders,
+      };
+    });
+
+  const readyForDespatch = branchOrders.filter(o => o.ordstatus === 60 && !o.manifest);
+  const groupedByArea = {};
+  readyForDespatch.forEach(o => {
+    const area = o.delivery_area || 'Unassigned area';
+    if (!groupedByArea[area]) groupedByArea[area] = [];
+    groupedByArea[area].push(o);
+  });
+
+  const preliminaryRows = Object.entries(groupedByArea).map(([area, areaOrders]) => {
+    const etds = areaOrders.map(o => o.etd).filter(Boolean).map(e => new Date(e));
+    const earliestEtd = etds.length ? new Date(Math.min(...etds)) : null;
+    const cubic = areaOrders.reduce((s,o) => s + (Number(o.order_cubic) || 0), 0);
+    return {
+      sortEtd: earliestEtd,
+      manifestLabel: '—',
+      carrierLabel: `TBA · ${area}`,
+      etd: earliestEtd,
+      orderCount: areaOrders.length,
+      delivered: null, failed: null,
+      cubic: cubic.toFixed(1),
+      isPreliminary: true,
+    };
+  }).filter(r => inWindowNormal(r.sortEtd));
+
+  const allRows = [...manifestRows, ...preliminaryRows].sort((a,b) => {
+    if (!a.sortEtd && !b.sortEtd) return 0;
+    if (!a.sortEtd) return 1;
+    if (!b.sortEtd) return -1;
+    return a.sortEtd - b.sortEtd;
+  });
+
+  document.getElementById('manifest-count').textContent = allRows.length;
+  document.getElementById('manifest-holdover').style.display = todayHasStarted ? 'none' : 'inline';
+
+  if (!allRows.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="7">Nothing in the queue for this branch.</td></tr>';
+    return;
+  }
+
+  const latestManifestIndexByCarrier = {};
+  allRows.forEach((r, i) => {
+    if (!r.isPreliminary && r.carrierLabel) {
+      latestManifestIndexByCarrier[r.carrierLabel.toUpperCase()] = i;
+    }
+  });
+
+  tbody.innerHTML = allRows.map((r, rowIndex) => {
+    const etdStr = r.etd ? r.etd.toLocaleString('en-NZ', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : '—';
+    const hasDeliveryComplete = (r.delivered || 0) > 0;
+    const settled = (r.delivered || 0) + (r.failed || 0);
+    const isFullyComplete = r.hasManifestComplete
+      || (r.delivered != null && r.orderCount > 0 && settled === r.orderCount);
+    const atBase = isAtBase(r.carrierLabel);
+    const badge = phaseBadgeForEtd(r.etd, now, hasDeliveryComplete, isFullyComplete, r.isPreliminary, atBase);
+    const failureNote = (isFullyComplete && r.failed > 0) ? ` <span class="badge failed">${r.failed} failed</span>` : '';
+    const deliveredStr = r.delivered != null ? `${r.delivered} / ${r.orderCount}` : '—';
+
+    const pos = vehiclePositions[r.carrierLabel?.toUpperCase?.()];
+    const isLatestForCarrier = !r.isPreliminary &&
+      latestManifestIndexByCarrier[r.carrierLabel?.toUpperCase?.()] === rowIndex;
+    const locationCell = !isLatestForCarrier
+      ? '<span style="color:var(--faint);">—</span>'
+      : atBase === true
+        ? `<span style="color:var(--amber);">Base</span>`
+        : pos?.suburb
+          ? `<span style="color:var(--muted);">${pos.suburb}</span>`
+          : '<span style="color:var(--faint);">—</span>';
+
+    return `<tr>
+      <td class="mono">${r.manifestLabel}</td>
+      <td>${r.carrierLabel}</td>
+      <td>${badge}${failureNote}</td>
+      <td>${etdStr}</td>
+      <td>${locationCell}</td>
+      <td class="right mono">${r.orderCount}</td>
+      <td class="right mono">${deliveredStr}</td>
+      <td class="right mono">${r.cubic}</td>
+    </tr>`;
+  }).join('');
+}
+
+// Phase badge for a COLLECT order — different lifecycle from a dispatch
+// manifest (no ETD/loading/out-for-delivery concept applies to "customer
+// will pick this up themselves"), so this maps ORDSTATUS to production
+// stages instead: Scheduled (32) / In Production (34) / Completed
+// Production (36), with sensible catch-alls either side of that range.
+function collectPhaseBadge(ordstatus) {
+  if (ordstatus === 32) return '<span class="badge ready">Scheduled</span>';
+  if (ordstatus === 34) return '<span class="badge loading">In Production</span>';
+  if (ordstatus === 36) return '<span class="badge complete">Ready</span>';
+  if (ordstatus != null && ordstatus < 32) return '<span class="badge ontime">Order placed</span>';
+  if (ordstatus != null && ordstatus > 36) return '<span class="badge dispatched">Ready for collection</span>';
+  return '<span class="badge ontime">—</span>';
+}
+
+function renderCollects(branchOrders, todayStr) {
+  const tbody = document.getElementById('collects-tbody');
+  const collects = branchOrders
+    .filter(o => (o.x_collect||'').toUpperCase() === 'Y' && (o.status === 0 || o.status === 1) && o.duedate <= todayStr && !isTruthyFlag(o.onhold))
+    .sort((a,b) => (a.duedate||'').localeCompare(b.duedate||''));
+
+  document.getElementById('collects-count').textContent = collects.length;
+
+  if (!collects.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="5">No collects due.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = collects.map(o => `
+    <tr>
+      <td class="mono">${o.seqno}</td>
+      <td title="${customerName(o.accno)}">${customerName(o.accno).slice(0,25)}${customerName(o.accno).length>25?'…':''}</td>
+      <td>${o.custorderno || '—'}</td>
+      <td>${collectPhaseBadge(o.ordstatus)}</td>
+      <td class="right mono">${o.order_cubic != null ? Number(o.order_cubic).toFixed(1) : '—'}</td>
+    </tr>`).join('');
+}
+
+function renderExternalCouriers(branchOrders, branchManifests, todayStr, queueDayStr, todayHasStarted) {
+  const tbody = document.getElementById('external-tbody');
+  const isExternal = carrierCode => couriers[carrierCode]?.show_in_app !== true;
+
+  const ordersByManifest = {};
+  orders.forEach(o => {
+    if (o.manifest == null) return;
+    if (!ordersByManifest[o.manifest]) ordersByManifest[o.manifest] = [];
+    ordersByManifest[o.manifest].push(o);
+  });
+
+  const manifestRows = branchManifests
+    .filter(m => todayHasStarted
+      ? (m.status === 0 || (m.status === 1 && m.etd && fmtDateLocal(new Date(m.etd)) === todayStr))
+      : (m.transdate === queueDayStr))
+    .filter(m => isExternal(m.carriercode))
+    .filter(m => m.etd && fmtDateLocal(new Date(m.etd)) === queueDayStr)
+    .filter(m => {
+      const relatedOrders = ordersByManifest[m.manifestno] || [];
+      if (!relatedOrders.length) return true;
+      return !relatedOrders.every(o => (o.x_collect||'').toUpperCase() === 'Y');
+    })
+    .map(m => {
+      const relatedOrders = ordersByManifest[m.manifestno] || [];
+      return {
+        manifestLabel: String(m.manifestno),
+        carrierLabel: m.carriercode || '—',
+        orderCount: relatedOrders.length,
+        cubic: m.manifest_cubic != null ? Number(m.manifest_cubic).toFixed(1) : '—',
+      };
+    });
+
+  document.getElementById('external-count').textContent = manifestRows.length;
+  document.getElementById('external-holdover').style.display = todayHasStarted ? 'none' : 'inline';
+
+  if (!manifestRows.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="4">No external courier manifests for today.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = manifestRows.map(r => `
+    <tr>
+      <td class="mono">${r.manifestLabel}</td>
+      <td>${r.carrierLabel}</td>
+      <td class="right mono">${r.orderCount}</td>
+      <td class="right mono">${r.cubic}</td>
+    </tr>`).join('');
+}
+
+function renderAll() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const todayStr = fmtDateLocal(today);
+
+  const branchOrders = orders.filter(o => o.branchno === BRANCH_NO);
+  const branchManifestNos = new Set(branchOrders.map(o => o.manifest).filter(m => m != null));
+  const branchManifests = manifests.filter(m => branchManifestNos.has(m.manifestno));
+
+  // IMPORTANT: etd is stored in UTC — comparing it as a raw STRING against
+  // todayStr is wrong, since the UTC date portion can differ from the
+  // NZ-local date even though the actual moment is correct (e.g.
+  // "2026-06-29T19:00:00+00:00" IS 7am NZT on the 30th). Must convert to a
+  // real Date and re-derive the LOCAL date string before comparing.
+  const todayHasStarted = branchManifests.some(m =>
+    m.transdate === todayStr && m.etd && fmtDateLocal(new Date(m.etd)) >= todayStr
+  );
+  const yesterdayStrForHoldover = lastWorkingDayStr(today);
+  const queueDayStr = todayHasStarted ? todayStr : yesterdayStrForHoldover;
+
+  renderTiles(branchOrders, branchManifests, todayStr);
+  renderManifestQueue(branchOrders, branchManifests, todayStr, queueDayStr, todayHasStarted);
+  renderCollects(branchOrders, todayStr);
+  renderExternalCouriers(branchOrders, branchManifests, todayStr, queueDayStr, todayHasStarted);
+
+  requestAnimationFrame(autofitTables);
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// AUTO-FIT — shrinks font size/row padding for each [data-autofit] table so
+// its rows always fit within the wrapper's actual height, no scrolling
+// needed on a TV nobody can scroll. Recalculated after every data refresh,
+// since row counts change continuously throughout the day.
+// ══════════════════════════════════════════════════════════════════════════
+const AUTOFIT_MAX_FONT = 19; // matches the original fixed size — never grows past this even with very few rows
+const AUTOFIT_MIN_FONT = 8;  // floor — lowered from 11, since 9 rows is the practical ceiling for this dashboard and a denser minimum keeps everything on one screen without scrolling
+const AUTOFIT_HEADER_PX = 37; // approx rendered height of the sticky header row, to subtract from available space — trimmed from 41 to claw back a touch more row space
+
+function autofitTables() {
+  // Step 0: RESET all CSS variables back to their defaults BEFORE measuring.
+  // Without this, previous render cycles' small-font values stay set on the
+  // wrapper elements, and clientHeight reads a stale compressed height rather
+  // than the full natural available space — meaning the table can never size
+  // back UP when row count drops, only ever DOWN as it increases. Resetting
+  // first forces a layout reflow at the natural (unconstrained) sizes, giving
+  // an accurate baseline for measurement in the next step.
+  document.querySelectorAll('[data-autofit="true"]').forEach(wrap => {
+    wrap.style.removeProperty('--row-font-size');
+    wrap.style.removeProperty('--row-pad-v');
+    wrap.style.removeProperty('--row-pad-h');
+    wrap.style.removeProperty('--badge-font-size');
+    wrap.style.removeProperty('--badge-pad-v');
+    wrap.style.removeProperty('--badge-pad-h');
+  });
+
+  // Step 1: READ — measure every table's available height after the reset
+  // reflow has settled, before any new sizes get written. This also prevents
+  // the first table's resize from contaminating later tables' measurements
+  // within the same pass (the original "random shrinking" bug).
+  const tables = [];
+  document.querySelectorAll('[data-autofit="true"]').forEach(wrap => {
+    const scroller = wrap.querySelector('.tbl-scroll');
+    const tbody = wrap.querySelector('tbody');
+    if (!scroller || !tbody) return;
+
+    const rowCount = tbody.querySelectorAll('tr:not(.empty-row)').length || tbody.querySelectorAll('tr').length;
+    if (rowCount === 0) return;
+
+    const availableHeight = scroller.clientHeight - AUTOFIT_HEADER_PX;
+    if (availableHeight <= 0) return;
+
+    tables.push({ wrap, rowCount, availableHeight });
+  });
+
+  // Step 2: COMPUTE AND WRITE — all measurements are captured, now apply.
+  tables.forEach(({ wrap, rowCount, availableHeight }) => {
+    const heightPerRow = availableHeight / rowCount;
+
+    let fontSize = Math.floor(heightPerRow / 1.78);
+    fontSize = Math.max(AUTOFIT_MIN_FONT, Math.min(AUTOFIT_MAX_FONT, fontSize));
+    const padV = Math.max(1, Math.round(fontSize * 0.28));
+    const padH = Math.max(5, Math.round(fontSize * 0.46));
+
+    // Badge vertical padding is ADDITIVE with the cell's own padV — at small
+    // font sizes this can dominate and prevent rows from shrinking as much as
+    // expected. Keep badge padV very small (just enough to not look cramped)
+    // rather than proportional to font size, since the cell padding already
+    // provides breathing room around the whole row including the badge.
+    const badgeFontSize = Math.max(7, Math.round(fontSize * 0.78));
+    const badgePadV = 1; // deliberately flat, not proportional — avoids additive height inflation
+    const badgePadH = Math.max(3, Math.round(fontSize * 0.28));
+
+    wrap.style.setProperty('--row-font-size', fontSize + 'px');
+    wrap.style.setProperty('--row-pad-v', padV + 'px');
+    wrap.style.setProperty('--row-pad-h', padH + 'px');
+    wrap.style.setProperty('--badge-font-size', badgeFontSize + 'px');
+    wrap.style.setProperty('--badge-pad-v', badgePadV + 'px');
+    wrap.style.setProperty('--badge-pad-h', badgePadH + 'px');
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// MAIN REFRESH CYCLE — retry with backoff, stale detection, hard reload
+// fallback. Same pattern as tv-view.html.
+// ══════════════════════════════════════════════════════════════════════════
+function setStatus(msg, stale) {
+  document.getElementById('last-updated').textContent = msg;
+  document.getElementById('status-dot').classList.toggle('stale', !!stale);
+}
+
+async function refreshOnce() {
+  try {
+    await fetchAll();
+    lastSuccessfulFetch = Date.now();
+    document.getElementById('branch-name').textContent = branchName(BRANCH_NO);
+    renderAll();
+    document.getElementById('stale-banner').classList.remove('show');
+    setStatus(`Updated ${new Date().toLocaleTimeString('en-NZ',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`, false);
+    return true;
+  } catch (e) {
+    console.error('Refresh failed:', e);
+    return false;
+  }
+}
+
+async function initialLoadWithRetry() {
+  const delays = [5000, 15000, 30000];
+  for (let i = 0; i < delays.length; i++) {
+    if (await refreshOnce()) return;
+    setStatus(`Connection failed — retrying in ${delays[i]/1000}s…`, true);
+    await new Promise(r => setTimeout(r, delays[i]));
+  }
+}
+
+function checkStaleness() {
+  if (lastSuccessfulFetch === null) return;
+  const age = Date.now() - lastSuccessfulFetch;
+  document.getElementById('stale-banner').classList.toggle('show', age > STALE_THRESHOLD_MS);
+  if (age > STALE_THRESHOLD_MS) {
+    setStatus(`Last successful update: ${new Date(lastSuccessfulFetch).toLocaleTimeString('en-NZ',{hour:'2-digit',minute:'2-digit'})} — connection may be down`, true);
+  }
+  if (age > HARD_RELOAD_MS) {
+    console.error('No successful refresh in 15 minutes — forcing full reload.');
+    location.reload();
+  }
+}
+
+function tickClock() {
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-NZ', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════════════════════
+function init() {
+  if (BRANCH_NO === null || isNaN(BRANCH_NO)) {
+    document.body.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:1080px;font-size:40px;color:var(--red);font-weight:800;text-align:center;padding:40px;">
+      Missing or invalid ?branch= URL parameter.<br>This kiosk needs a branch number, e.g. dispatch-tv.html?branch=4
+    </div>`;
+    return;
+  }
+
+  document.getElementById('branch-name').textContent = branchName(BRANCH_NO);
+
+  tickClock();
+  setInterval(tickClock, 1000);
+
+  initialLoadWithRetry();
+
+  setInterval(async () => {
+    const ok = await refreshOnce();
+    if (!ok) setStatus('Refresh failed — will retry shortly', true);
+  }, POLL_INTERVAL_MS);
+
+  setInterval(checkStaleness, 15000);
+}
+
+init();
+</script>
+</body>
+</html>
