@@ -239,8 +239,11 @@
 // CONFIG — embedded directly since this kiosk page has no settings UI at
 // all, same pattern as tv-view.html. Read-only credentials.
 // ══════════════════════════════════════════════════════════════════════════
-const SUPA_URL = 'https://jrpysikxibrbbellroid.supabase.co';
-const SUPA_KEY = 'PASTE_YOUR_ANON_KEY_HERE';
+// Supabase credentials — loaded from localStorage, never hardcoded.
+// On first load the user is prompted to enter them. They're saved locally
+// and never sent anywhere except to Supabase itself.
+const SUPA_URL = localStorage.getItem('dispatch_supa_url') || '';
+const SUPA_KEY = localStorage.getItem('dispatch_supa_key') || '';
 
 // Branch comes from the URL, e.g. dispatch-tv.html?branch=4 — same pattern
 // as tv-view.html. No fallback to "all branches": a screen with no branch
@@ -830,7 +833,45 @@ function tickClock() {
 // ══════════════════════════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════════════════════════
+function ensureCredentials() {
+  if (SUPA_URL && SUPA_KEY) return true;
+  // Credentials not set — show a simple setup screen
+  document.body.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:center;height:100vh;background:var(--bg);">
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:48px;width:500px;max-width:90vw;">
+        <h2 style="color:var(--text);font-size:28px;margin:0 0 8px;">Expol Dispatch TV</h2>
+        <p style="color:var(--muted);font-size:16px;margin:0 0 32px;">Enter your Supabase credentials to connect. These are saved on this device only.</p>
+        <div style="margin-bottom:16px;">
+          <div style="color:var(--muted);font-size:13px;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">Supabase URL</div>
+          <input id="cred-url" type="text" placeholder="https://xxxx.supabase.co"
+            style="width:100%;padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:16px;box-sizing:border-box;">
+        </div>
+        <div style="margin-bottom:24px;">
+          <div style="color:var(--muted);font-size:13px;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">Anon Key</div>
+          <input id="cred-key" type="password" placeholder="eyJ..."
+            style="width:100%;padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:16px;box-sizing:border-box;">
+        </div>
+        <button onclick="saveCredentials()"
+          style="width:100%;padding:14px;background:var(--accent);border:none;border-radius:8px;color:white;font-size:18px;font-weight:700;cursor:pointer;">
+          Connect
+        </button>
+      </div>
+    </div>`;
+  return false;
+}
+
+function saveCredentials() {
+  const url = document.getElementById('cred-url').value.trim();
+  const key = document.getElementById('cred-key').value.trim();
+  if (!url || !key) { alert('Please enter both URL and key.'); return; }
+  localStorage.setItem('dispatch_supa_url', url);
+  localStorage.setItem('dispatch_supa_key', key);
+  location.reload();
+}
+
 function init() {
+  if (!ensureCredentials()) return;
+
   if (BRANCH_NO === null || isNaN(BRANCH_NO)) {
     document.body.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:1080px;font-size:40px;color:var(--red);font-weight:800;text-align:center;padding:40px;">
       Missing or invalid ?branch= URL parameter.<br>This kiosk needs a branch number, e.g. dispatch-tv.html?branch=4
