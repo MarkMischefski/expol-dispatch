@@ -270,6 +270,8 @@ let debtors = {};   // accno -> name
 let couriers = {};  // courier_name -> {show_in_app, isactive, ...}
 let branchNames = {}; // branchno -> name, from the capacity app's shared settings
 let vehiclePositions = {}; // carrier_code -> { suburb, lat, lng, full_address }
+let scheduleRows = [];     // dispatch_manifest_schedule rows
+let couriersBySeqno = {};  // seqno -> courier row
 let lastSuccessfulFetch = null;
 
 function supaHeaders() { return { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }; }
@@ -323,9 +325,10 @@ function isTruthyFlag(val) {
 }
 
 async function fetchAll() {
-  const [orderRows, manifestRows, debtorRows, courierRows, settingsRows, vehicleRows] = await Promise.all([
+  const [orderRows, manifestRows, scheduleRows_raw, debtorRows, courierRows, settingsRows, vehicleRows] = await Promise.all([
     fetchAllPages('dispatch_orders'),
     fetchAllPages('dispatch_manifests'),
+    fetchAllPages('dispatch_manifest_schedule'),
     fetchAllPages('dispatch_debtors'),
     fetchAllPages('dispatch_couriers'),
     fetchAllPages('capacity_app_settings', '&id=eq.1'),
@@ -333,9 +336,11 @@ async function fetchAll() {
   ]);
   orders = orderRows;
   manifests = manifestRows;
+  scheduleRows = scheduleRows_raw;
   vehiclePositions = Object.fromEntries(vehicleRows.map(v => [v.carrier_code, v]));
   debtors = Object.fromEntries(debtorRows.map(d => [d.accno, d.name]));
   couriers = Object.fromEntries(courierRows.map(c => [c.courier_name, c]));
+  couriersBySeqno = Object.fromEntries(courierRows.filter(c => c.seqno != null).map(c => [Number(c.seqno), c]));
   if (settingsRows && settingsRows.length) {
     branchNames = (settingsRows[0].settings || {}).branchNames || {};
   }
@@ -382,22 +387,41 @@ function setAlertTile(wrapId, valId, count) {
 function renderTiles(branchOrders, branchManifests, todayStr) {
   const yesterdayStr = lastWorkingDayStr(new Date());
 
-  const yesterdayLocalManifests = branchManifests.filter(m =>
-    m.transdate === yesterdayStr && couriers[m.carriercode]?.show_in_app === true
+  // Tile 1: Yesterday m³ — total cubic of all orders on yesterday's manifests
+  const yesterdayManifestNos = new Set(
+    branchManifests.filter(m => m.transdate === yesterdayStr).map(m => m.manifestno)
   );
-  const yesterdayCubic = yesterdayLocalManifests.reduce((s,m) => s + (Number(m.manifest_cubic) || 0), 0);
-  const distinctCouriers = new Set(yesterdayLocalManifests.map(m => m.carriercode)).size;
-  const avgRunsPerCourier = distinctCouriers > 0 ? (yesterdayLocalManifests.length / distinctCouriers) : 0;
+  const yesterdayCubic = branchOrders
+    .filter(o => o.manifest != null && yesterdayManifestNos.has(o.manifest))
+    .reduce((s, o) => s + (Number(o.order_cubic) || 0), 0);
 
-  const readyOrders = branchOrders.filter(o => o.ordstatus === 36 && !o.has_manifest && o.duedate <= todayStr);
-  const readyCubic = readyOrders.reduce((s,o) => s + (Number(o.order_cubic) || 0), 0);
+  // Tile 2: Avg runs / courier — completed manifests yesterday / distinct couriers
+  const completedYesterdayManifests = branchManifests.filter(m =>
+    m.transdate === yesterdayStr && m.delivery_complete != null
+  );
+  const distinctYesterdayCouriers = new Set(completedYesterdayManifests.map(m => m.carriercode)).size;
+  const avgRunsPerCourier = distinctYesterdayCouriers > 0
+    ? (completedYesterdayManifests.length / distinctYesterdayCouriers) : 0;
+
+  // Tile 3 & 4: Ready to manifest — ordstatus=36, no manifest, due today or before,
+  // not collect, not on hold
+  const readyOrders = branchOrders.filter(o =>
+    o.ordstatus === 36 &&
+    !o.manifest &&
+    o.duedate <= todayStr &&
+    (o.x_collect || '').toUpperCase() !== 'Y' &&
+    !isTruthyFlag(o.onhold)
+  );
+  const readyCubic = readyOrders.reduce((s, o) => s + (Number(o.order_cubic) || 0), 0);
 
   const rubbishOverdue = branchOrders.filter(o =>
     o.status === 0 && isTruthyFlag(o.x_rubbish_pickup) && o.duedate < todayStr && !isTruthyFlag(o.onhold)
   ).length;
 
+  const syncWindowStart = fmtDateLocal(new Date(Date.now() - 21 * 24 * 60 * 60 * 1000));
   const overdueOrders = branchOrders.filter(o =>
     o.status === 0 && o.duedate < todayStr
+    && o.duedate >= syncWindowStart
     && !isTruthyFlag(o.x_rubbish_pickup)
     && (o.x_collect||'').toUpperCase() !== 'Y'
     && !isTruthyFlag(o.onhold)
@@ -513,7 +537,11 @@ function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDaySt
       };
     });
 
-  const readyForDespatch = branchOrders.filter(o => o.ordstatus === 60 && !o.manifest);
+  const branchSchedule = scheduleRows.filter(s => s.branchno === BRANCH_NO);
+  const scheduledOrderNos = new Set(branchSchedule.map(s => s.orderno));
+  const readyForDespatch = branchOrders.filter(o =>
+    o.ordstatus === 60 && !o.manifest && scheduledOrderNos.has(o.seqno)
+  );
   const groupedByArea = {};
   readyForDespatch.forEach(o => {
     const area = o.delivery_area || 'Unassigned area';
@@ -521,23 +549,36 @@ function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDaySt
     groupedByArea[area].push(o);
   });
 
-  const preliminaryRows = Object.entries(groupedByArea).map(([area, areaOrders]) => {
-    const etds = areaOrders.map(o => o.etd).filter(Boolean).map(e => new Date(e));
-    const earliestEtd = etds.length ? new Date(Math.min(...etds)) : null;
-    const cubic = areaOrders.reduce((s,o) => s + (Number(o.order_cubic) || 0), 0);
-    return {
-      sortEtd: earliestEtd,
-      manifestLabel: '—',
-      carrierLabel: `TBA · ${area}`,
-      etd: earliestEtd,
-      orderCount: areaOrders.length,
-      delivered: null, failed: null,
-      cubic: cubic.toFixed(1),
-      isPreliminary: true,
-    };
-  }).filter(r => inWindowNormal(r.sortEtd));
+  const preliminaryRows = []; // suppressed — schedule rows cover this
 
-  const allRows = [...manifestRows, ...preliminaryRows].sort((a,b) => {
+  // ── Scheduled runs ────────────────────────────────────────────────────────
+  const scheduleGroups = {};
+  branchSchedule.forEach(s => {
+    const key = `${s.courier_seqno}||${s.etd}`;
+    if (!scheduleGroups[key]) scheduleGroups[key] = { courier_seqno: s.courier_seqno, etd: s.etd, rows: [] };
+    scheduleGroups[key].rows.push(s);
+  });
+  const scheduleManifestRows = Object.values(scheduleGroups).map(grp => {
+    const etdDate = grp.etd ? new Date(grp.etd) : null;
+    const courier = couriersBySeqno[Number(grp.courier_seqno)];
+    const carrierLabel = courier ? courier.courier_name : `Courier ${grp.courier_seqno}`;
+    const cubic = grp.rows.reduce((s, r) => s + (Number(r.cubic) || 0), 0);
+    return {
+      sortEtd: etdDate,
+      manifestLabel: 'Sched.',
+      carrierLabel,
+      etd: etdDate,
+      orderCount: grp.rows.length,
+      delivered: 0, failed: 0,
+      cubic: cubic.toFixed(1),
+      isPreliminary: false,
+      isScheduled: true,
+      hasManifestComplete: false,
+      hasExcludedOrders: false,
+    };
+  });
+
+  const allRows = [...manifestRows, ...scheduleManifestRows, ...preliminaryRows].sort((a,b) => {
     if (!a.sortEtd && !b.sortEtd) return 0;
     if (!a.sortEtd) return 1;
     if (!b.sortEtd) return -1;
