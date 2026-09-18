@@ -257,9 +257,30 @@ const params = new URLSearchParams(window.location.search);
 //                 5=Rolleston 6=Cromwell 7=Tauranga
 const BRANCH_NO = params.has('branch') ? parseInt(params.get('branch')) : null;
 
-const POLL_INTERVAL_MS   = 10 * 60 * 1000; // 10 minutes
-const STALE_THRESHOLD_MS = 15 * 60 * 1000; // 15 min — show the stale banner
-const HARD_RELOAD_MS     = 30 * 60 * 1000; // 30 min — last-resort full reload
+const POLL_INTERVAL_MS    = 10 * 60 * 1000; // 10 minutes
+const STALE_THRESHOLD_MS  = 15 * 60 * 1000; // 15 min — show the stale banner
+const HARD_RELOAD_MS      = 30 * 60 * 1000; // 30 min — last-resort full reload
+const VERSION_CHECK_MS    =  5 * 60 * 1000; // 5 min — check for new app version
+
+// ── Version check — forces hard reload when a new version is deployed ────────
+// Create a version.json file in the same GitHub repo as dispatch-tv.html:
+//   { "v": "1" }
+// Increment "v" each time you push a new version. The TV will reload within 5 min.
+let _currentVersion = null;
+async function checkForNewVersion() {
+  try {
+    const base = location.href.split('?')[0].replace('dispatch-tv.html', '');
+    const res = await fetch(`${base}version.json?_=${Date.now()}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (_currentVersion === null) {
+      _currentVersion = data.v; // first load — store current version
+    } else if (data.v !== _currentVersion) {
+      console.log(`New version detected (${_currentVersion} → ${data.v}) — reloading`);
+      location.reload(true);
+    }
+  } catch (e) { /* version.json not found or network error — ignore */ }
+}
 
 // ══════════════════════════════════════════════════════════════════════════
 // STATE — same shape as the desk dashboard
@@ -474,7 +495,13 @@ function isAtBase(carrierCode) {
   );
 }
 
-function phaseBadgeForEtd(etd, now, hasDeliveryComplete, isFullyComplete, isPreliminary, atBase) {
+function phaseBadgeForEtd(etd, now, hasDeliveryComplete, isFullyComplete, isPreliminary, atBase, isScheduled) {
+  if (isScheduled) {
+    const h = etd ? (etd - now) / 3600000 : null;
+    if (h !== null && h < 0) return '<span class="badge overdue">Overdue</span>';
+    if (h !== null && h >= 0 && h <= 1) return '<span class="badge loading">Loading</span>';
+    return '<span class="badge ready">Ready for despatch</span>';
+  }
   if (isFullyComplete) return '<span class="badge complete">Complete</span>';
   if (isPreliminary)   return '<span class="badge ready">Ready for despatch</span>';
   const hoursToEtd = etd ? (etd - now) / 3600000 : null;
@@ -607,7 +634,7 @@ function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDaySt
     const isFullyComplete = r.hasManifestComplete
       || (r.delivered != null && r.orderCount > 0 && settled === r.orderCount);
     const atBase = isAtBase(r.carrierLabel);
-    const badge = phaseBadgeForEtd(r.etd, now, hasDeliveryComplete, isFullyComplete, r.isPreliminary, atBase);
+    const badge = phaseBadgeForEtd(r.etd, now, hasDeliveryComplete, isFullyComplete, r.isPreliminary, atBase, r.isScheduled);
     const failureNote = (isFullyComplete && r.failed > 0) ? ` <span class="badge failed">${r.failed} failed</span>` : '';
     const deliveredStr = r.delivered != null ? `${r.delivered} / ${r.orderCount}` : '—';
 
@@ -931,6 +958,10 @@ function init() {
     const ok = await refreshOnce();
     if (!ok) setStatus('Refresh failed — will retry shortly', true);
   }, POLL_INTERVAL_MS);
+
+  // Check for new version every 5 minutes — reloads page if version.json changes
+  checkForNewVersion();
+  setInterval(checkForNewVersion, VERSION_CHECK_MS);
 
   setInterval(checkStaleness, 15000);
 }
