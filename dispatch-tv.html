@@ -533,6 +533,10 @@ function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDaySt
     ordersByManifest[o.manifest].push(o);
   });
 
+  // Build schedule set early for backorder exclusion in relatedOrders
+  const branchScheduleForFilter = scheduleRows.filter(s => s.branchno === BRANCH_NO);
+  const scheduledOrderNosForFilter = new Set(branchScheduleForFilter.map(s => s.orderno));
+
   const manifestRows = branchManifests
     .filter(m => todayHasStarted
       ? (m.status === 0 || (m.status === 1 && m.etd && fmtDateLocal(new Date(m.etd)) === todayStr))
@@ -543,6 +547,8 @@ function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDaySt
       const manifestEtd = m.etd ? new Date(m.etd) : null;
       const allManifestOrders = ordersByManifest[m.manifestno] || [];
       const relatedOrders = allManifestOrders.filter(o => {
+        if (scheduledOrderNosForFilter.has(o.seqno) &&
+            (o.delivery_confirmed || '').toUpperCase() === 'Y') return false;
         if (o.ordstatus === 90 || o.ordstatus === 83) return true;
         if (!o.etd || !manifestEtd) return true;
         return new Date(o.etd) <= manifestEtd;
@@ -550,10 +556,14 @@ function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDaySt
       const delivered = relatedOrders.filter(o => o.ordstatus === 90).length;
       const failed = relatedOrders.filter(o => o.ordstatus === 83).length;
       const hasExcludedOrders = relatedOrders.length < allManifestOrders.length;
+      const delAreas = [...new Set(allManifestOrders.map(o => o.delivery_area).filter(Boolean))];
+      const carrierCode = m.carriercode || '—';
+      const carrierLabel = delAreas.length ? `${carrierCode} · ${delAreas.join(', ')}` : carrierCode;
       return {
         sortEtd: m.etd ? new Date(m.etd) : null,
         manifestLabel: String(m.manifestno),
-        carrierLabel: m.carriercode || '—',
+        carrierCode,
+        carrierLabel,
         etd: m.etd ? new Date(m.etd) : null,
         orderCount: allManifestOrders.length,
         delivered, failed,
@@ -588,7 +598,9 @@ function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDaySt
   const scheduleManifestRows = Object.values(scheduleGroups).map(grp => {
     const etdDate = grp.etd ? new Date(grp.etd) : null;
     const courier = couriersBySeqno[Number(grp.courier_seqno)];
-    const carrierLabel = courier ? courier.courier_name : `Courier ${grp.courier_seqno}`;
+    const baseName = courier ? courier.courier_name : `Courier ${grp.courier_seqno}`;
+    const areas = [...new Set(grp.rows.map(r => r.delivery_area).filter(Boolean))];
+    const carrierLabel = areas.length ? `${baseName} · ${areas.join(', ')}` : baseName;
     const cubic = grp.rows.reduce((s, r) => s + (Number(r.cubic) || 0), 0);
     return {
       sortEtd: etdDate,
@@ -633,12 +645,13 @@ function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDaySt
     const settled = (r.delivered || 0) + (r.failed || 0);
     const isFullyComplete = r.hasManifestComplete
       || (r.delivered != null && r.orderCount > 0 && settled === r.orderCount);
-    const atBase = isAtBase(r.carrierLabel);
+    const gpsKey = (r.carrierCode || r.carrierLabel)?.toUpperCase?.();
+    const atBase = isAtBase(gpsKey);
     const badge = phaseBadgeForEtd(r.etd, now, hasDeliveryComplete, isFullyComplete, r.isPreliminary, atBase, r.isScheduled);
     const failureNote = (isFullyComplete && r.failed > 0) ? ` <span class="badge failed">${r.failed} failed</span>` : '';
     const deliveredStr = r.delivered != null ? `${r.delivered} / ${r.orderCount}` : '—';
 
-    const pos = vehiclePositions[r.carrierLabel?.toUpperCase?.()];
+    const pos = vehiclePositions[gpsKey];
     const isLatestForCarrier = !r.isPreliminary &&
       latestManifestIndexByCarrier[r.carrierLabel?.toUpperCase?.()] === rowIndex;
     const locationCell = !isLatestForCarrier
@@ -723,9 +736,12 @@ function renderExternalCouriers(branchOrders, branchManifests, todayStr, queueDa
     })
     .map(m => {
       const relatedOrders = ordersByManifest[m.manifestno] || [];
+      const delAreas = [...new Set(relatedOrders.map(o => o.delivery_area).filter(Boolean))];
+      const carrierBase = m.carriercode || '—';
+      const carrierLabel = delAreas.length ? `${carrierBase} · ${delAreas.join(', ')}` : carrierBase;
       return {
         manifestLabel: String(m.manifestno),
-        carrierLabel: m.carriercode || '—',
+        carrierLabel,
         orderCount: relatedOrders.length,
         cubic: m.manifest_cubic != null ? Number(m.manifest_cubic).toFixed(1) : '—',
       };
