@@ -195,7 +195,7 @@
               <thead>
                 <tr><th>Manifest</th><th>Carrier / area</th><th>Phase</th><th>Planned ETD</th><th>Location</th><th class="right">Orders</th><th class="right">Delivered</th><th class="right">m³</th></tr>
               </thead>
-              <tbody id="manifest-tbody"><tr class="empty-row"><td colspan="7">Loading…</td></tr></tbody>
+              <tbody id="manifest-tbody"><tr class="empty-row"><td colspan="8">Loading…</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -558,7 +558,7 @@ function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDaySt
       const hasExcludedOrders = relatedOrders.length < allManifestOrders.length;
       const delAreas = [...new Set(allManifestOrders.map(o => o.delivery_area).filter(Boolean))];
       const carrierCode = m.carriercode || '—';
-      const carrierLabel = delAreas.length ? `${carrierCode} · ${delAreas.join(', ')}` : carrierCode;
+      const carrierLabel = delAreas.length ? `${carrierCode} <span style="color:var(--muted);">(${delAreas.join(', ')})</span>` : carrierCode;
       return {
         sortEtd: m.etd ? new Date(m.etd) : null,
         manifestLabel: String(m.manifestno),
@@ -600,7 +600,7 @@ function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDaySt
     const courier = couriersBySeqno[Number(grp.courier_seqno)];
     const baseName = courier ? courier.courier_name : `Courier ${grp.courier_seqno}`;
     const areas = [...new Set(grp.rows.map(r => r.delivery_area).filter(Boolean))];
-    const carrierLabel = areas.length ? `${baseName} · ${areas.join(', ')}` : baseName;
+    const carrierLabel = areas.length ? `${baseName} <span style="color:var(--muted);">(${areas.join(', ')})</span>` : baseName;
     const cubic = grp.rows.reduce((s, r) => s + (Number(r.cubic) || 0), 0);
     return {
       sortEtd: etdDate,
@@ -628,7 +628,7 @@ function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDaySt
   document.getElementById('manifest-holdover').style.display = todayHasStarted ? 'none' : 'inline';
 
   if (!allRows.length) {
-    tbody.innerHTML = '<tr class="empty-row"><td colspan="7">Nothing in the queue for this branch.</td></tr>';
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="8">Nothing in the queue for this branch.</td></tr>';
     return;
   }
 
@@ -738,7 +738,7 @@ function renderExternalCouriers(branchOrders, branchManifests, todayStr, queueDa
       const relatedOrders = ordersByManifest[m.manifestno] || [];
       const delAreas = [...new Set(relatedOrders.map(o => o.delivery_area).filter(Boolean))];
       const carrierBase = m.carriercode || '—';
-      const carrierLabel = delAreas.length ? `${carrierBase} · ${delAreas.join(', ')}` : carrierBase;
+      const carrierLabel = delAreas.length ? `${carrierBase} <span style="color:var(--muted);">(${delAreas.join(', ')})</span>` : carrierBase;
       return {
         manifestLabel: String(m.manifestno),
         carrierLabel,
