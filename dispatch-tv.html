@@ -250,12 +250,16 @@ const SUPA_KEY = localStorage.getItem('dispatch_supa_key') || '';
 // specified should show an error, not silently display the wrong site.
 const params = new URLSearchParams(window.location.search);
 
-// Branch number from URL ?branch=N parameter.
+// Branch number(s) from URL ?branch=N parameter.
+// Supports a single branch (?branch=4) or multiple comma-separated (?branch=4,8).
 // Each kiosk shortcut points to the GitHub Pages URL with the correct branch:
 //   https://YOURUSER.github.io/expol-dispatch/dispatch-tv.html?branch=0
 // Branch numbers: 0=Auckland 1=Blenheim 3=Wellington 4=Christchurch
-//                 5=Rolleston 6=Cromwell 7=Tauranga
-const BRANCH_NO = params.has('branch') ? parseInt(params.get('branch')) : null;
+//                 5=Rolleston 6=Cromwell 7=Tauranga 8=Canterbury
+const BRANCH_NOS = params.has('branch')
+  ? params.get('branch').split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n))
+  : [];
+const BRANCH_NO = BRANCH_NOS.length === 1 ? BRANCH_NOS[0] : (BRANCH_NOS[0] ?? null); // kept for legacy compat
 
 const POLL_INTERVAL_MS    = 10 * 60 * 1000; // 10 minutes
 const STALE_THRESHOLD_MS  = 15 * 60 * 1000; // 15 min — show the stale banner
@@ -473,6 +477,7 @@ function renderTiles(branchOrders, branchManifests, todayStr) {
 // ── Geofence ──────────────────────────────────────────────────────────────────
 const DEPOT_LOCATIONS = [
   { lat: -36.9253, lng: 174.8018, radius: 0.3 }, // Auckland — Captain Springs Rd, Onehunga
+  { lat: -43.5953, lng: 172.3776, radius: 0.3 }, // Rolleston (Canterbury) — 53 Factory Dr
 ];
 
 function haversineKm(lat1, lng1, lat2, lng2) {
@@ -534,7 +539,7 @@ function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDaySt
   });
 
   // Build schedule set early for backorder exclusion in relatedOrders
-  const branchScheduleForFilter = scheduleRows.filter(s => s.branchno === BRANCH_NO);
+  const branchScheduleForFilter = scheduleRows.filter(s => BRANCH_NOS.includes(s.branchno));
   const scheduledOrderNosForFilter = new Set(branchScheduleForFilter.map(s => s.orderno));
 
   const manifestRows = branchManifests
@@ -574,7 +579,7 @@ function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDaySt
       };
     });
 
-  const branchSchedule = scheduleRows.filter(s => s.branchno === BRANCH_NO);
+  const branchSchedule = scheduleRows.filter(s => BRANCH_NOS.includes(s.branchno));
   const scheduledOrderNos = new Set(branchSchedule.map(s => s.orderno));
   const readyForDespatch = branchOrders.filter(o =>
     o.ordstatus === 60 && !o.manifest && scheduledOrderNos.has(o.seqno)
@@ -634,8 +639,8 @@ function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDaySt
 
   const latestManifestIndexByCarrier = {};
   allRows.forEach((r, i) => {
-    if (!r.isPreliminary && r.carrierLabel) {
-      latestManifestIndexByCarrier[r.carrierLabel.toUpperCase()] = i;
+    if (!r.isPreliminary && r.carrierCode) {
+      latestManifestIndexByCarrier[r.carrierCode.toUpperCase()] = i;
     }
   });
 
@@ -653,7 +658,7 @@ function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDaySt
 
     const pos = vehiclePositions[gpsKey];
     const isLatestForCarrier = !r.isPreliminary &&
-      latestManifestIndexByCarrier[r.carrierLabel?.toUpperCase?.()] === rowIndex;
+      latestManifestIndexByCarrier[r.carrierCode?.toUpperCase?.()] === rowIndex;
     const locationCell = !isLatestForCarrier
       ? '<span style="color:var(--faint);">—</span>'
       : atBase === true
@@ -768,7 +773,7 @@ function renderAll() {
   const today = new Date(); today.setHours(0,0,0,0);
   const todayStr = fmtDateLocal(today);
 
-  const branchOrders = orders.filter(o => o.branchno === BRANCH_NO);
+  const branchOrders = orders.filter(o => BRANCH_NOS.includes(o.branchno));
   const branchManifestNos = new Set(branchOrders.map(o => o.manifest).filter(m => m != null));
   const branchManifests = manifests.filter(m => branchManifestNos.has(m.manifestno));
 
@@ -877,7 +882,7 @@ async function refreshOnce() {
   try {
     await fetchAll();
     lastSuccessfulFetch = Date.now();
-    document.getElementById('branch-name').textContent = branchName(BRANCH_NO);
+    document.getElementById('branch-name').textContent = BRANCH_NOS.map(branchName).join(' + ');
     renderAll();
     document.getElementById('stale-banner').classList.remove('show');
     setStatus(`Updated ${new Date().toLocaleTimeString('en-NZ',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`, false);
@@ -956,14 +961,14 @@ function saveCredentials() {
 function init() {
   if (!ensureCredentials()) return;
 
-  if (BRANCH_NO === null || isNaN(BRANCH_NO)) {
+  if (BRANCH_NOS.length === 0) {
     document.body.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:1080px;font-size:40px;color:var(--red);font-weight:800;text-align:center;padding:40px;">
-      Missing or invalid ?branch= URL parameter.<br>This kiosk needs a branch number, e.g. dispatch-tv.html?branch=4
+      Missing or invalid ?branch= URL parameter.<br>This kiosk needs a branch number, e.g. dispatch-tv.html?branch=4<br>or multiple: dispatch-tv.html?branch=4,8
     </div>`;
     return;
   }
 
-  document.getElementById('branch-name').textContent = branchName(BRANCH_NO);
+  document.getElementById('branch-name').textContent = BRANCH_NOS.map(branchName).join(' + ');
 
   tickClock();
   setInterval(tickClock, 1000);
