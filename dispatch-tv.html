@@ -261,7 +261,8 @@ const BRANCH_NOS = params.has('branch')
   : [];
 const BRANCH_NO = BRANCH_NOS.length === 1 ? BRANCH_NOS[0] : (BRANCH_NOS[0] ?? null); // kept for legacy compat
 
-const POLL_INTERVAL_MS    = 10 * 60 * 1000; // 10 minutes
+const POLL_INTERVAL_MS    = 10 * 60 * 1000; // 10 minutes — full data refresh
+const GPS_POLL_MS         =  2 * 60 * 1000; // 2 minutes — GPS positions only
 const STALE_THRESHOLD_MS  = 15 * 60 * 1000; // 15 min — show the stale banner
 const HARD_RELOAD_MS      = 30 * 60 * 1000; // 30 min — last-resort full reload
 const VERSION_CHECK_MS    =  5 * 60 * 1000; // 5 min — check for new app version
@@ -368,6 +369,20 @@ async function fetchAll() {
   couriersBySeqno = Object.fromEntries(courierRows.filter(c => c.seqno != null).map(c => [Number(c.seqno), c]));
   if (settingsRows && settingsRows.length) {
     branchNames = (settingsRows[0].settings || {}).branchNames || {};
+  }
+}
+
+// GPS-only refresh — fetches just vehicle positions and re-renders without
+// touching the heavy order/manifest/schedule data. Runs every 2 minutes
+// independently of the full 10-minute poll so locations stay fresh without
+// doubling the Supabase request count.
+async function refreshGpsOnly() {
+  try {
+    const rows = await fetchAllPages('dispatch_vehicle_positions');
+    vehiclePositions = Object.fromEntries(rows.map(v => [v.carrier_code, v]));
+    render(); // re-render with updated positions, everything else unchanged
+  } catch (e) {
+    console.warn('GPS refresh failed:', e);
   }
 }
 
@@ -984,6 +999,9 @@ function init() {
     const ok = await refreshOnce();
     if (!ok) setStatus('Refresh failed — will retry shortly', true);
   }, POLL_INTERVAL_MS);
+
+  // GPS positions refresh every 2 minutes — independent of the full 10-min poll
+  setInterval(refreshGpsOnly, GPS_POLL_MS);
 
   // Check for new version every 5 minutes — reloads page if version.json changes
   checkForNewVersion();
