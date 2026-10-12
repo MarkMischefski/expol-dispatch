@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=1920, initial-scale=1">
 <title>Expol Dispatch Dashboard</title>
 <style>
   :root {
@@ -28,8 +28,8 @@
     background: var(--bg);
     color: var(--text);
     font-family: var(--sans);
-    width: 100%;
-    height: 100%;
+    width: 1920px;
+    height: 1080px;
     overflow: hidden;
     user-select: none;
     -webkit-user-select: none;
@@ -39,7 +39,7 @@
   .shell {
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    height: 1080px;
     padding: 10px 34px 14px;
     gap: 10px;
   }
@@ -261,8 +261,7 @@ const BRANCH_NOS = params.has('branch')
   : [];
 const BRANCH_NO = BRANCH_NOS.length === 1 ? BRANCH_NOS[0] : (BRANCH_NOS[0] ?? null); // kept for legacy compat
 
-const POLL_INTERVAL_MS    = 10 * 60 * 1000; // 10 minutes — full data refresh
-const GPS_POLL_MS         =  2 * 60 * 1000; // 2 minutes — GPS positions only
+const POLL_INTERVAL_MS    = 10 * 60 * 1000; // 10 minutes
 const STALE_THRESHOLD_MS  = 15 * 60 * 1000; // 15 min — show the stale banner
 const HARD_RELOAD_MS      = 30 * 60 * 1000; // 30 min — last-resort full reload
 const VERSION_CHECK_MS    =  5 * 60 * 1000; // 5 min — check for new app version
@@ -372,20 +371,6 @@ async function fetchAll() {
   }
 }
 
-// GPS-only refresh — fetches just vehicle positions and re-renders without
-// touching the heavy order/manifest/schedule data. Runs every 2 minutes
-// independently of the full 10-minute poll so locations stay fresh without
-// doubling the Supabase request count.
-async function refreshGpsOnly() {
-  try {
-    const rows = await fetchAllPages('dispatch_vehicle_positions');
-    vehiclePositions = Object.fromEntries(rows.map(v => [v.carrier_code, v]));
-    render(); // re-render with updated positions, everything else unchanged
-  } catch (e) {
-    console.warn('GPS refresh failed:', e);
-  }
-}
-
 // ══════════════════════════════════════════════════════════════════════════
 // RENDER — identical logic to dispatch-dashboard.html, scoped to BRANCH_NO
 // instead of a user-selected branch.
@@ -491,8 +476,9 @@ function renderTiles(branchOrders, branchManifests, todayStr) {
 
 // ── Geofence ──────────────────────────────────────────────────────────────────
 const DEPOT_LOCATIONS = [
-  { lat: -36.9253, lng: 174.8018, radius: 0.3 }, // Auckland — Captain Springs Rd, Onehunga
-  { lat: -43.5953, lng: 172.3776, radius: 0.3 }, // Rolleston (Canterbury) — 53 Factory Dr
+  { lat: -36.9253, lng: 174.8018, radius: 0.3 }, // Auckland (branch 0) — Captain Springs Rd, Onehunga
+  { lat: -43.5953, lng: 172.3776, radius: 0.3 }, // Rolleston/Canterbury (branch 8) — 53 Factory Dr
+  { lat: -43.5320, lng: 172.6366, radius: 0.3 }, // Christchurch (branch 4) — Waterloo Rd, Hornby
 ];
 
 function haversineKm(lat1, lng1, lat2, lng2) {
@@ -999,9 +985,6 @@ function init() {
     const ok = await refreshOnce();
     if (!ok) setStatus('Refresh failed — will retry shortly', true);
   }, POLL_INTERVAL_MS);
-
-  // GPS positions refresh every 2 minutes — independent of the full 10-min poll
-  setInterval(refreshGpsOnly, GPS_POLL_MS);
 
   // Check for new version every 5 minutes — reloads page if version.json changes
   checkForNewVersion();
