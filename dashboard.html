@@ -611,8 +611,8 @@ function renderTiles(branchOrders, branchManifests, todayStr) {
 // lat/lng for each branch depot — used to determine if a truck is "at base".
 // Add entries for other branches as GPS is rolled out to them.
 const DEPOT_LOCATIONS = [
-  { lat: -36.9253, lng: 174.8018, radius: 0.3 }, // Auckland — 105 Captain Springs Rd, Onehunga
-  { lat: -43.5953, lng: 172.3776, radius: 0.3 }, // Rolleston (Canterbury) — 53 Factory Dr
+  { lat: -36.9253, lng: 174.8018, radius: 0.3 }, // Auckland (branch 0) — 105 Captain Springs Rd, Onehunga
+  { lat: -43.5729, lng: 172.3891, radius: 0.3 }, // Rolleston (branches 4 & 8) — 53 Factory Drive
 ];
 const GEOFENCE_RADIUS_KM = 0.3; // 300m default radius
 
@@ -862,12 +862,7 @@ function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDaySt
     const isFullyComplete = r.hasManifestComplete
       || (r.delivered != null && r.orderCount > 0 && settled === r.orderCount);
     const gpsKey = (r.carrierCode || r.carrierLabel)?.toUpperCase?.();
-    const atBaseGps = isAtBase(gpsKey); // real GPS result — used for location display
-    // For future-dated manifests (tomorrow+) force atBase=true for the status badge
-    // so we never show "Out for delivery" for a run that hasn't started yet.
-    // The location cell still uses real GPS so dispatchers can see where the truck is.
-    const isFutureManifest = r.etd && fmtDateLocal(r.etd) > todayStr;
-    const atBase = isFutureManifest ? true : atBaseGps;
+    const atBase = isAtBase(gpsKey);
     const badge = phaseBadgeForEtd(r.etd, now, hasDeliveryComplete, isFullyComplete, r.isPreliminary, atBase, r.isScheduled);
     const failureNote = (isFullyComplete && r.failed > 0)
       ? ` <span class="badge failed">${r.failed} failed</span>` : '';
@@ -878,7 +873,7 @@ function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDaySt
       latestManifestIndexByCarrier[r.carrierCode?.toUpperCase?.()] === rowIndex;
     const locationCell = !isLatestForCarrier
       ? '<span style="color:var(--faint);font-size:11px;">—</span>'
-      : atBaseGps === true
+      : atBase === true
         ? `<span style="color:var(--amber);font-size:11px;">Base</span>`
         : pos?.suburb
           ? `<span style="color:var(--muted);font-size:11px;" title="${pos.full_address}">${pos.suburb}</span>`
