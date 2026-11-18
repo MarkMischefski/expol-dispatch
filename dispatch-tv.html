@@ -362,7 +362,8 @@ async function fetchAll() {
   orders = orderRows;
   manifests = manifestRows;
   scheduleRows = scheduleRows_raw;
-  vehiclePositions = Object.fromEntries(vehicleRows.map(v => [v.carrier_code, v]));
+  // Normalise keys to trimmed uppercase so lookups (which always .toUpperCase()) match reliably.
+  vehiclePositions = Object.fromEntries(vehicleRows.map(v => [v.carrier_code?.trim().toUpperCase() ?? v.carrier_code, v]));
   debtors = Object.fromEntries(debtorRows.map(d => [d.accno, d.name]));
   couriers = Object.fromEntries(courierRows.map(c => [c.courier_name, c]));
   couriersBySeqno = Object.fromEntries(courierRows.filter(c => c.seqno != null).map(c => [Number(c.seqno), c]));
@@ -546,7 +547,7 @@ function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDaySt
     .filter(m => todayHasStarted
       ? (m.status === 0 || (m.status === 1 && m.etd && fmtDateLocal(new Date(m.etd)) === todayStr))
       : (m.transdate === queueDayStr))
-    .filter(m => couriers[m.carriercode]?.show_in_app === true)
+    .filter(m => couriers[m.carriercode?.trim()]?.show_in_app === true)
     .filter(m => todayHasStarted ? inWindowNormal(m.etd) : true)
     .map(m => {
       const manifestEtd = m.etd ? new Date(m.etd) : null;
@@ -562,7 +563,7 @@ function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDaySt
       const failed = relatedOrders.filter(o => o.ordstatus === 83).length;
       const hasExcludedOrders = relatedOrders.length < allManifestOrders.length;
       const delAreas = [...new Set(allManifestOrders.map(o => o.delivery_area).filter(Boolean))];
-      const carrierCode = m.carriercode || '—';
+      const carrierCode = m.carriercode?.trim() || '—';
       const carrierLabel = delAreas.length ? `${carrierCode} <span style="color:var(--muted);">(${delAreas.join(', ')})</span>` : carrierCode;
       return {
         sortEtd: m.etd ? new Date(m.etd) : null,
@@ -650,7 +651,7 @@ function renderManifestQueue(branchOrders, branchManifests, todayStr, queueDaySt
     const settled = (r.delivered || 0) + (r.failed || 0);
     const isFullyComplete = r.hasManifestComplete
       || (r.delivered != null && r.orderCount > 0 && settled === r.orderCount);
-    const gpsKey = (r.carrierCode || r.carrierLabel)?.toUpperCase?.();
+    const gpsKey = (r.carrierCode || r.carrierLabel)?.trim().toUpperCase();
     const atBaseGps = isAtBase(gpsKey); // real GPS result — used for location display
     // For future-dated manifests (tomorrow+) force atBase=true for the status badge
     // so we never show "Out for delivery" for a run that hasn't started yet.
@@ -724,7 +725,7 @@ function renderCollects(branchOrders, todayStr) {
 
 function renderExternalCouriers(branchOrders, branchManifests, todayStr, queueDayStr, todayHasStarted) {
   const tbody = document.getElementById('external-tbody');
-  const isExternal = carrierCode => couriers[carrierCode]?.show_in_app !== true;
+  const isExternal = carrierCode => couriers[carrierCode?.trim()]?.show_in_app !== true;
 
   const ordersByManifest = {};
   orders.forEach(o => {
